@@ -1,7 +1,53 @@
 use ::colored::Colorize;
-use ::rand::{thread_rng, Rng};
-use rand::{rngs::ThreadRng, seq::SliceRandom};
+use ::rand::{rngs::ThreadRng, seq::SliceRandom, thread_rng, Rng};
+use std::collections::HashMap;
 
+fn compress(data: &[u8]) -> Vec<u32> {
+    // Borrowed this compression algorithm from @LukasDeco because the
+    // package couldn't be found on cargo!
+    //https://github.com/LukasDeco/lzw-compress/blob/main/src/lib.rs
+
+    // Build the initial dictionary with single-byte sequences.
+    let mut dictionary: HashMap<Vec<u8>, u32> = (0u32..=255).map(|i| (vec![i as u8], i)).collect();
+
+    let mut current_sequence = Vec::new();
+    let mut compressed = Vec::new();
+
+    for &byte in data {
+        // Try to extend the current sequence.
+        current_sequence.push(byte);
+
+        // Check if the extended sequence is in the dictionary.
+        if let Some(&_code) = dictionary.get(&current_sequence) {
+            // The sequence is in the dictionary, continue to extend it.
+            continue;
+        }
+
+        // The sequence is not in the dictionary, so add it.
+        // Write the code for the current sequence to the output.
+        if let Some(&code) = dictionary.get(&current_sequence[..current_sequence.len() - 1]) {
+            compressed.push(code);
+        } else {
+            panic!("Invalid dictionary state.");
+        }
+
+        // Add the new sequence to the dictionary.
+        dictionary.insert(current_sequence.clone(), dictionary.len() as u32);
+
+        // Reset the current sequence to the last byte.
+        current_sequence.clear();
+        current_sequence.push(byte);
+    }
+
+    // Write the code for the last sequence to the output.
+    if let Some(&code) = dictionary.get(&current_sequence) {
+        compressed.push(code);
+    } else {
+        panic!("Invalid dictionary state.");
+    }
+
+    compressed
+}
 #[derive(Debug)]
 struct Program {
     genome: Vec<u8>,
@@ -17,6 +63,32 @@ impl Program {
         Program {
             genome: string_in.into_bytes(),
         }
+    }
+    fn higher_order_entropy(self) -> f32 {
+        // higher_order_entropy = shannon_entropy - kolmogorov_complexity (estimate)
+        let genome_len = self.genome.len();
+        // Calculate shannon_entropy O(N+M), where N=genome_len, M=u8::MAX
+        let mut counts = [0; 255];
+        for byte in &self.genome {
+            counts[*byte as usize] += 1;
+        }
+        let mut shannon_entropy = 0.;
+        for count in counts {
+            if count > 0 {
+                let freq = count as f32 / genome_len as f32;
+                shannon_entropy += freq * freq.log2();
+            }
+        }
+        shannon_entropy *= -1.;
+        // Approximate kolmogorov complexity by measuring compression
+        let kolmogorov_complexity =
+            (compress(&self.genome.as_slice()).len() as f32 / genome_len as f32) * 8.0;
+        println!(
+            "shannon: {:?} kolmogorov:{:?}",
+            &shannon_entropy, &kolmogorov_complexity
+        );
+        // Combine to get "higher_order_entropy"
+        shannon_entropy - kolmogorov_complexity
     }
 }
 
@@ -59,7 +131,7 @@ impl BFFProgram {
         }
         println!("");
     }
-    fn emulate(mut self) -> Self {
+    fn emulate(mut self, verbose: bool) -> Self {
         let tape_len = self.tape.len();
         while self.iteration < self.max_iterations {
             let instruction = self.tape[self.pc_pos];
@@ -116,7 +188,9 @@ impl BFFProgram {
             }
 
             // Show the current tape, coloured with head/pc positions
-            self.print_tape();
+            if verbose {
+                self.print_tape();
+            }
 
             self.iteration += 1;
             self.pc_pos += 1;
@@ -161,11 +235,16 @@ fn main() {
     // Choose two programs
     let g1 = Program::from_string("[[{.>]-]                ]-]>.{[[".to_string());
     let g2 = Program::from_string("00000000000000000000000000000000".to_string());
-    println!("{:?}", &g1);
-    println!("{:?}", &g2);
 
     // Combine and run emulation
     let tape = [g1.genome, g2.genome].concat().clone();
     let mut bff_program = BFFProgram::from_string(String::from_utf8(tape).expect("Invalif UTF-8"));
-    bff_program = bff_program.emulate();
+    bff_program = bff_program.emulate(false);
+    println!(
+        "{}",
+        Program {
+            genome: bff_program.tape
+        }
+        .higher_order_entropy()
+    );
 }
