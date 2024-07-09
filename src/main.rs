@@ -1,5 +1,6 @@
 use ::colored::Colorize;
-use ::rand::{rngs::ThreadRng, seq::SliceRandom, thread_rng, Rng};
+use ::rand::{distributions::Standard, rngs::ThreadRng, seq::SliceRandom, thread_rng, Rng};
+use itertools::Itertools;
 use std::collections::HashMap;
 
 fn compress(data: &[u8]) -> Vec<u32> {
@@ -48,47 +49,45 @@ fn compress(data: &[u8]) -> Vec<u32> {
 
     compressed
 }
-#[derive(Debug)]
+
+fn higher_order_entropy(in_array: &[u8], verbose: bool) -> f32 {
+    // higher_order_entropy = shannon_entropy - kolmogorov_complexity (estimate)
+    let genome_len = in_array.len();
+    // Calculate shannon_entropy O(N+M), where N=genome_len, M=u8::MAX
+    let mut counts = [0; 256];
+    for byte in in_array {
+        counts[*byte as usize] += 1;
+    }
+    let mut shannon_entropy = 0.;
+    for count in counts {
+        if count > 0 {
+            let freq = count as f32 / genome_len as f32;
+            shannon_entropy += freq * freq.log2();
+        }
+    }
+    shannon_entropy *= -1.;
+    // Approximate kolmogorov complexity by measuring compression
+    let kolmogorov_complexity = (compress(&in_array).len() as f32 / genome_len as f32) * 8.0;
+    if verbose {
+        println!(
+            "shannon: {:?} kolmogorov:{:?}",
+            &shannon_entropy, &kolmogorov_complexity
+        );
+    }
+    // Combine to get "higher_order_entropy"
+    shannon_entropy - kolmogorov_complexity
+}
+
+#[derive(Debug, Clone)]
 struct Program {
     genome: Vec<u8>,
 }
 impl Program {
     fn random(rng: &mut ThreadRng) -> Self {
-        let genome: [u8; 32] = rng.gen(); // array construction
+        let genome: Vec<u8> = rng.sample_iter(&Standard).take(PROGRAM_SIZE).collect();
         Program {
             genome: genome.to_vec(),
         }
-    }
-    fn from_string(string_in: String) -> Self {
-        Program {
-            genome: string_in.into_bytes(),
-        }
-    }
-    fn higher_order_entropy(self) -> f32 {
-        // higher_order_entropy = shannon_entropy - kolmogorov_complexity (estimate)
-        let genome_len = self.genome.len();
-        // Calculate shannon_entropy O(N+M), where N=genome_len, M=u8::MAX
-        let mut counts = [0; 255];
-        for byte in &self.genome {
-            counts[*byte as usize] += 1;
-        }
-        let mut shannon_entropy = 0.;
-        for count in counts {
-            if count > 0 {
-                let freq = count as f32 / genome_len as f32;
-                shannon_entropy += freq * freq.log2();
-            }
-        }
-        shannon_entropy *= -1.;
-        // Approximate kolmogorov complexity by measuring compression
-        let kolmogorov_complexity =
-            (compress(&self.genome.as_slice()).len() as f32 / genome_len as f32) * 8.0;
-        println!(
-            "shannon: {:?} kolmogorov:{:?}",
-            &shannon_entropy, &kolmogorov_complexity
-        );
-        // Combine to get "higher_order_entropy"
-        shannon_entropy - kolmogorov_complexity
     }
 }
 
@@ -103,11 +102,11 @@ struct BFFProgram {
     state: String,
 }
 impl BFFProgram {
-    fn from_string(input_string: String) -> Self {
+    fn from_vec(input_tape: Vec<u8>) -> Self {
         BFFProgram {
-            tape: input_string.into_bytes(),
+            tape: input_tape,
             head0_pos: 0,
-            head1_pos: 0,
+            head1_pos: PROGRAM_SIZE,
             pc_pos: 0,
             max_iterations: 128,
             iteration: 0,
@@ -146,8 +145,12 @@ impl BFFProgram {
                 b',' => self.tape[self.head0_pos] = self.tape[self.head1_pos],
                 b'[' => {
                     if self.tape[self.head0_pos] == b'0' {
+                        if self.pc_pos == tape_len {
+                            self.state = "Error, unmatched `[`".to_string();
+                            break;
+                        }
                         let mut diff = 1;
-                        for ind in (self.pc_pos + 1)..=tape_len {
+                        for ind in (self.pc_pos + 1)..=(tape_len - 1) {
                             if self.tape[ind] == b'[' {
                                 diff += 1;
                             } else if self.tape[ind] == b']' {
@@ -166,6 +169,11 @@ impl BFFProgram {
                 }
                 b']' => {
                     if self.tape[self.head0_pos] != b'0' {
+                        if self.pc_pos == 0 {
+                            self.state = "Error, unmatched `]`".to_string();
+                            break;
+                        }
+
                         let mut diff = 1;
                         for ind in (0..=(self.pc_pos - 1)).rev() {
                             if self.tape[ind] == b']' {
@@ -199,13 +207,15 @@ impl BFFProgram {
                 break;
             }
         }
-        println!(
-            "{:?}, iteration: {:?}, skipped: {:?}",
-            self.state, self.iteration, self.skipped
-        );
+        if verbose {
+            println!(
+                "{:?}, iteration: {:?}, skipped: {:?}",
+                self.state, self.iteration, self.skipped
+            );
+        }
 
         BFFProgram {
-            tape: self.tape,
+            tape: self.tape.clone(),
             head0_pos: self.head0_pos,
             head1_pos: self.head1_pos,
             pc_pos: self.pc_pos,
@@ -217,34 +227,69 @@ impl BFFProgram {
     }
 }
 
+const POPULATION_SIZE: usize = 20000;
+const PROGRAM_SIZE: usize = 32;
+const MAX_EPOCHS: usize = 100000;
+const REPORT_INTERVAL: usize = 100;
+
 fn main() {
     // Create soup of programs
     let mut rng = thread_rng();
-    let _soup: Vec<Program> = (0..10).map(|_| Program::random(&mut rng)).collect();
+    let mut soup: Vec<Program> = (0..POPULATION_SIZE)
+        .map(|_| Program::random(&mut rng))
+        .collect();
 
-    // // Choose two at random
-    // let g1 = soup
-    //     .choose(&mut rng)
-    //     .expect("Could not choose program from soup");
-    // let g2 = soup
-    //     .choose(&mut rng)
-    //     .expect("Could not choose program from soup");
-    // println!("{:?}", &g1);
-    // println!("{:?}", &g2);
+    // // Example replicator run
+    // let g1 = Program {
+    //     genome: "[[{.>]-]                ]-]>.{[["
+    //         .to_string()
+    //         .as_bytes()
+    //         .to_vec(),
+    // };
+    // let g2 = Program {
+    //     genome: "00000000000000000000000000000000"
+    //         .to_string()
+    //         .as_bytes()
+    //         .to_vec(),
+    // };
+    // let tape = [g1.genome, g2.genome].concat().clone();
+    // let mut bff_program = BFFProgram::from_vec(tape);
+    // bff_program = bff_program.emulate(true);
+    // println!("{:?}", higher_order_entropy(&bff_program.tape, false))
 
-    // Choose two programs
-    let g1 = Program::from_string("[[{.>]-]                ]-]>.{[[".to_string());
-    let g2 = Program::from_string("00000000000000000000000000000000".to_string());
+    // Run the full search
+    let mut epoch = 0;
+    while epoch < MAX_EPOCHS {
+        // Sample random pairs from the population
+        let mut random_order: Vec<usize> = (0..POPULATION_SIZE).collect();
+        random_order.shuffle(&mut rng);
 
-    // Combine and run emulation
-    let tape = [g1.genome, g2.genome].concat().clone();
-    let mut bff_program = BFFProgram::from_string(String::from_utf8(tape).expect("Invalif UTF-8"));
-    bff_program = bff_program.emulate(false);
-    println!(
-        "{}",
-        Program {
-            genome: bff_program.tape
+        // Emulate pairs and replace (ideally in parallel)
+        for (ind1, ind2) in random_order.iter().tuple_windows() {
+            // println!("{:?} {:?}", &ind1, &ind2);
+            let tape = [soup[*ind1].genome.clone(), soup[*ind2].genome.clone()].concat();
+            let mut bff_program = BFFProgram::from_vec(tape);
+            bff_program = bff_program.emulate(false);
+
+            soup[*ind1] = Program {
+                genome: bff_program.tape[0..PROGRAM_SIZE].to_vec(),
+            };
+            soup[*ind2] = Program {
+                genome: bff_program.tape[PROGRAM_SIZE..].to_vec(),
+            };
         }
-        .higher_order_entropy()
-    );
+
+        // Report epoch metrics
+        if epoch % REPORT_INTERVAL == 0 {
+            // flatten the soup
+            let flat_soup = soup
+                .iter()
+                .flat_map(|prog| prog.genome.clone())
+                .collect::<Vec<_>>();
+            let hoe = higher_order_entropy(&flat_soup, false);
+            println!("Iteration {:4<0}: Higher-Order Entropy={}", &epoch, hoe);
+        }
+
+        epoch += 1;
+    }
 }
