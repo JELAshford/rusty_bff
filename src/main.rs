@@ -21,7 +21,7 @@ fn higher_order_entropy(in_array: &[u8], verbose: bool) -> f32 {
     }
     shannon_entropy *= -1.;
     // Approximate kolmogorov complexity by measuring compression
-    let compressed_len = BrotliEncoder::new(in_array, 6).bytes().count();
+    let compressed_len = BrotliEncoder::new(in_array, 2).bytes().count();
     let kolmogorov_complexity = (compressed_len as f32 / genome_len as f32) * 8.0;
     if verbose {
         println!(
