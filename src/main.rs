@@ -1,54 +1,8 @@
+use ::brotli2::bufread::BrotliEncoder;
 use ::colored::Colorize;
 use ::rand::{distributions::Standard, rngs::ThreadRng, seq::SliceRandom, thread_rng, Rng};
 use itertools::Itertools;
-use std::collections::HashMap;
-
-fn compress(data: &[u8]) -> Vec<u32> {
-    // Borrowed this compression algorithm from @LukasDeco because the
-    // package couldn't be found on cargo!
-    //https://github.com/LukasDeco/lzw-compress/blob/main/src/lib.rs
-
-    // Build the initial dictionary with single-byte sequences.
-    let mut dictionary: HashMap<Vec<u8>, u32> = (0u32..=255).map(|i| (vec![i as u8], i)).collect();
-
-    let mut current_sequence = Vec::new();
-    let mut compressed = Vec::new();
-
-    for &byte in data {
-        // Try to extend the current sequence.
-        current_sequence.push(byte);
-
-        // Check if the extended sequence is in the dictionary.
-        if let Some(&_code) = dictionary.get(&current_sequence) {
-            // The sequence is in the dictionary, continue to extend it.
-            continue;
-        }
-
-        // The sequence is not in the dictionary, so add it.
-        // Write the code for the current sequence to the output.
-        if let Some(&code) = dictionary.get(&current_sequence[..current_sequence.len() - 1]) {
-            compressed.push(code);
-        } else {
-            panic!("Invalid dictionary state.");
-        }
-
-        // Add the new sequence to the dictionary.
-        dictionary.insert(current_sequence.clone(), dictionary.len() as u32);
-
-        // Reset the current sequence to the last byte.
-        current_sequence.clear();
-        current_sequence.push(byte);
-    }
-
-    // Write the code for the last sequence to the output.
-    if let Some(&code) = dictionary.get(&current_sequence) {
-        compressed.push(code);
-    } else {
-        panic!("Invalid dictionary state.");
-    }
-
-    compressed
-}
+use std::io::Read;
 
 fn higher_order_entropy(in_array: &[u8], verbose: bool) -> f32 {
     // higher_order_entropy = shannon_entropy - kolmogorov_complexity (estimate)
@@ -67,7 +21,8 @@ fn higher_order_entropy(in_array: &[u8], verbose: bool) -> f32 {
     }
     shannon_entropy *= -1.;
     // Approximate kolmogorov complexity by measuring compression
-    let kolmogorov_complexity = (compress(&in_array).len() as f32 / genome_len as f32) * 8.0;
+    let compressed_len = BrotliEncoder::new(in_array, 6).bytes().count();
+    let kolmogorov_complexity = (compressed_len as f32 / genome_len as f32) * 8.0;
     if verbose {
         println!(
             "shannon: {:?} kolmogorov:{:?}",
@@ -286,7 +241,7 @@ fn main() {
                 .iter()
                 .flat_map(|prog| prog.genome.clone())
                 .collect::<Vec<_>>();
-            let hoe = higher_order_entropy(&flat_soup, false);
+            let hoe = higher_order_entropy(&flat_soup, true);
             println!("Iteration {:4<0}: Higher-Order Entropy={}", &epoch, hoe);
         }
 
