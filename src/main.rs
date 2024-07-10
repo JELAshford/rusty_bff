@@ -91,7 +91,7 @@ impl Program {
     }
 }
 
-struct BFFProgram {
+struct BFFRun {
     tape: Vec<u8>,
     head0_pos: usize,
     head1_pos: usize,
@@ -101,9 +101,9 @@ struct BFFProgram {
     skipped: usize,
     state: String,
 }
-impl BFFProgram {
+impl BFFRun {
     fn from_vec(input_tape: Vec<u8>) -> Self {
-        BFFProgram {
+        BFFRun {
             tape: input_tape,
             head0_pos: 0,
             head1_pos: PROGRAM_SIZE,
@@ -214,7 +214,7 @@ impl BFFProgram {
             );
         }
 
-        BFFProgram {
+        BFFRun {
             tape: self.tape.clone(),
             head0_pos: self.head0_pos,
             head1_pos: self.head1_pos,
@@ -253,7 +253,7 @@ fn main() {
     //         .to_vec(),
     // };
     // let tape = [g1.genome, g2.genome].concat().clone();
-    // let mut bff_program = BFFProgram::from_vec(tape);
+    // let mut bff_program = BFFRun::from_vec(tape);
     // bff_program = bff_program.emulate(true);
     // println!("{:?}", higher_order_entropy(&bff_program.tape, false))
 
@@ -268,7 +268,7 @@ fn main() {
         for (ind1, ind2) in random_order.iter().tuple_windows() {
             // println!("{:?} {:?}", &ind1, &ind2);
             let tape = [soup[*ind1].genome.clone(), soup[*ind2].genome.clone()].concat();
-            let mut bff_program = BFFProgram::from_vec(tape);
+            let mut bff_program = BFFRun::from_vec(tape);
             bff_program = bff_program.emulate(false);
 
             soup[*ind1] = Program {
