@@ -242,7 +242,10 @@ fn main() {
                 .flat_map(|prog| prog.genome.clone())
                 .collect::<Vec<_>>();
             let hoe = higher_order_entropy(&flat_soup, true);
-            println!("Iteration {:4<0}: Higher-Order Entropy={}", &epoch, hoe);
+            println!("Epoch {:4<0}: Higher-Order Entropy={}", &epoch, hoe);
+            for ind in 0..5 {
+                println!("\t\t{}", String::from_utf8_lossy(&soup[ind].genome))
+            }
         }
 
         epoch += 1;
